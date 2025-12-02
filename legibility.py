@@ -50,6 +50,21 @@ def main():
             output_latent_hidden_states=True
         )
 
+    lm_head = model.base_causallm.lm_head
+
+    for i, hidden in enumerate(latent_hidden_states):
+        thought_logits = lm_head(hidden)
+        thought_probs = torch.softmax(thought_logits, dim=-1)
+        
+        top_k_probs, top_k_indices = torch.topk(thought_probs, k=5)
+        
+        if rank == 0:
+            print(f"Thought {i+1}:")
+            for j in range(5):
+                token_str = tokenizer.decode(top_k_indices[j].item())
+                prob = top_k_probs[j].item()
+                print(f"  {token_str}: {prob*100:.1f}%")
+
     output_text = tokenizer.decode(output_ids[0], skip_special_tokens=True)
     
     if rank == 0:
