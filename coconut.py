@@ -7,7 +7,7 @@ from torch.nn import CrossEntropyLoss
 from collections import namedtuple
 from transformers.models.gpt2 import GPT2LMHeadModel
 
-Outputs = namedtuple("Outputs", ["loss", "inputs_embeds", "logits"])
+Outputs = namedtuple("Outputs", ["loss", "inputs_embeds", "logits", "latent_hidden_states"])
 MAX_N_LATENT = 8
 
 
@@ -39,6 +39,7 @@ class Coconut(nn.Module):
     def forward(self, input_ids, attention_mask, labels, position_ids, **kwargs):
 
         logits = []
+        latent_hidden_states = []
 
         latent_indices = (
             input_ids == self.latent_token_id
@@ -121,6 +122,14 @@ class Coconut(nn.Module):
             ]  # Get the last layer hidden states
             kv_cache = outputs.past_key_values
 
+            for instance_idx, mask_list in enumerate(latent_lists):
+                if len(mask_list) > pass_idx:
+                    token_idx = mask_list[pass_idx]
+                    thought_hidden = hidden_states[
+                        instance_idx, token_idx - 1 - hidden_states_offset, :
+                    ].clone()
+                    latent_hidden_states.append(thought_hidden)
+
             # feedback the continuous thoughts to the input_embeds
 
             # first decide the positions to feedback
@@ -190,7 +199,12 @@ class Coconut(nn.Module):
             shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1)
         )
 
-        return Outputs(loss=loss, inputs_embeds=inputs_embeds, logits=logits)
+        return Outputs(
+            loss=loss,
+            inputs_embeds=inputs_embeds,
+            logits=logits,
+            latent_hidden_states=latent_hidden_states
+        )
 
     def train(self):
         self.base_causallm.train()
@@ -203,6 +217,7 @@ class Coconut(nn.Module):
         input_ids,
         attention_mask,  # attention_mask is not used
         max_new_tokens=16,
+        output_latent_hidden_states=False,
         output_embedding=False,
         synced_gpus=False,
         **kwargs
@@ -224,6 +239,7 @@ class Coconut(nn.Module):
             ).reshape(1, -1),
         )
         inputs_embeds = outputs.inputs_embeds
+        latent_hidden_states = outputs.latent_hidden_states
 
         # get the first token using the current hidden state
         next_token = torch.argmax(outputs.logits[0, -1]).item()
@@ -254,9 +270,9 @@ class Coconut(nn.Module):
                 self.gen_forward_cnt += 1
                 _ = self.base_causallm(inputs_embeds=new_inputs_embeds)
 
-        if output_embedding:
-            # for analysis purpose
+        if output_latent_hidden_states:
+            return torch.tensor(tokens).view(1, -1), latent_hidden_states
+        elif output_embedding:
             return torch.tensor(tokens).view(1, -1), new_inputs_embeds
-
         else:
             return torch.tensor(tokens).view(1, -1)

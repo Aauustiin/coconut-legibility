@@ -43,16 +43,18 @@ def main():
     
     # Generate a response
     with torch.no_grad():
-        output_ids = model.generate(
+        output_ids, latent_hidden_states = model.generate(
             input_ids=input_ids,
             attention_mask=attention_mask,
-            max_new_tokens=64
+            max_new_tokens=64,
+            output_latent_hidden_states=True
         )
 
     output_text = tokenizer.decode(output_ids[0], skip_special_tokens=True)
     
     if rank == 0:
         print(output_text)
+        print(len(latent_hidden_states))
 
     torch.distributed.destroy_process_group()
 
