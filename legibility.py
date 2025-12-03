@@ -56,6 +56,9 @@ def main():
     # Number of latent tokens to use (you can adjust this)
     num_latent_tokens = 3
 
+    # Store results
+    results = []
+
     # Process each question in the dataset (first 10 for quick testing)
     for idx, sample in enumerate(gsm_data[:10]):
         question = sample["question"]
@@ -63,7 +66,7 @@ def main():
 
         if rank == 0:
             print(f"\n{'='*80}")
-            print(f"Question {idx+1}/{len(gsm_data)}")
+            print(f"Question {idx+1}/{len(gsm_data[:10])}")
             print(f"{'='*80}")
             print(f"Q: {question}")
             print(f"Ground truth answer: {ground_truth_answer}")
@@ -85,60 +88,98 @@ def main():
 
         lm_head = model.base_causallm.lm_head
 
+        # Process thoughts and collect results
+        top_k_thoughts = []
+        top_p_thoughts = []
+        raw_thoughts = []
+
+        for i, hidden in enumerate(latent_hidden_states):
+            thought_logits = lm_head(hidden)
+            thought_probs = torch.softmax(thought_logits, dim=-1)
+
+            # Raw continuous thought (hidden state as list)
+            raw_thoughts.append(hidden.cpu().tolist())
+
+            # Top-k
+            top_k_probs, top_k_indices = torch.topk(thought_probs, k=5)
+            top_k_data = [
+                {"token": tokenizer.decode(top_k_indices[j].item()),
+                 "prob": top_k_probs[j].item()}
+                for j in range(len(top_k_indices))
+            ]
+            top_k_thoughts.append(top_k_data)
+
+            # Top-p
+            top_p_probs, top_p_indices = topp(thought_probs, p=0.9)
+            top_p_data = [
+                {"token": tokenizer.decode(top_p_indices[j].item()),
+                 "prob": top_p_probs[j].item()}
+                for j in range(len(top_p_indices))
+            ]
+            top_p_thoughts.append(top_p_data)
+
         if rank == 0:
             print("Legible thoughts (top-5 tokens per latent):")
             print("-" * 80)
-
-        # Show top-k for each thought
-        for i, hidden in enumerate(latent_hidden_states):
-            thought_logits = lm_head(hidden)
-            thought_probs = torch.softmax(thought_logits, dim=-1)
-
-            top_k_probs, top_k_indices = torch.topk(thought_probs, k=5)
-
-            if rank == 0:
+            for i, top_k_data in enumerate(top_k_thoughts):
                 print(f"Latent thought {i+1}:")
-                for j in range(len(top_k_indices)):
-                    token_str = tokenizer.decode(top_k_indices[j].item())
-                    prob = top_k_probs[j].item()
-                    print(f"  {token_str}: {prob*100:.1f}%")
+                for item in top_k_data:
+                    print(f"  {item['token']}: {item['prob']*100:.1f}%")
                 print()
 
-        if rank == 0:
             print("-" * 80)
             print("Legible thoughts (top-p=0.9 tokens per latent):")
             print("-" * 80)
-
-        # Show top-p for each thought
-        for i, hidden in enumerate(latent_hidden_states):
-            thought_logits = lm_head(hidden)
-            thought_probs = torch.softmax(thought_logits, dim=-1)
-
-            top_p_probs, top_p_indices = topp(thought_probs, p=0.9)
-
-            if rank == 0:
-                print(f"Latent thought {i+1} (top-p=0.9, {len(top_p_indices)} tokens):")
-                # Show up to 20 tokens to avoid too much output
-                for j in range(min(len(top_p_indices), 20)):
-                    token_str = tokenizer.decode(top_p_indices[j].item())
-                    prob = top_p_probs[j].item()
-                    print(f"  {token_str}: {prob*100:.1f}%")
-                if len(top_p_indices) > 20:
-                    print(f"  ... and {len(top_p_indices) - 20} more tokens")
+            for i, top_p_data in enumerate(top_p_thoughts):
+                print(f"Latent thought {i+1} (top-p=0.9, {len(top_p_data)} tokens):")
+                for j, item in enumerate(top_p_data[:20]):
+                    print(f"  {item['token']}: {item['prob']*100:.1f}%")
+                if len(top_p_data) > 20:
+                    print(f"  ... and {len(top_p_data) - 20} more tokens")
                 print()
 
         output_text = tokenizer.decode(output_ids[0], skip_special_tokens=True)
+
+        # Extract answer and reasoning
+        answer_output = output_text.split("#")[-1].replace(",", "").strip()
+        # Get the reasoning (everything before the final answer)
+        reasoning = output_text.split("#")[0].strip() if "#" in output_text else ""
+        # Remove the question from reasoning
+        if question in reasoning:
+            reasoning = reasoning.replace(question, "").strip()
+
+        is_correct = answer_output == ground_truth_answer
 
         if rank == 0:
             print("-" * 80)
             print(f"Model output:\n{output_text}")
             print()
-
-            # Extract answer
-            answer_output = output_text.split("#")[-1].replace(",", "").strip()
             print(f"Extracted answer: {answer_output}")
-            print(f"Correct: {answer_output == ground_truth_answer}")
+            print(f"Correct: {is_correct}")
             print()
+
+            # Store result
+            result = {
+                "question_idx": idx,
+                "question": question,
+                "ground_truth_answer": ground_truth_answer,
+                "model_reasoning": reasoning,
+                "model_answer": answer_output,
+                "is_correct": is_correct,
+                "raw_continuous_thoughts": raw_thoughts,
+                "top_k_thoughts": top_k_thoughts,
+                "top_p_thoughts": top_p_thoughts
+            }
+            results.append(result)
+
+    # Save results to JSON file
+    if rank == 0:
+        output_file = "legibility_results.json"
+        with open(output_file, "w") as f:
+            json.dump(results, f, indent=2)
+        print(f"\n{'='*80}")
+        print(f"Results saved to {output_file}")
+        print(f"{'='*80}")
 
     torch.distributed.destroy_process_group()
 
