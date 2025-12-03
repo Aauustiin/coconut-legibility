@@ -3,6 +3,19 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 import os
 from coconut import Coconut
 
+def topp(probs, p=0.9):
+
+    sorted_probs, sorted_indices = torch.sort(probs, descending=True)
+    
+    cumsum_probs = torch.cumsum(sorted_probs, dim=0)
+    
+    num_tokens = (cumsum_probs <= p).sum() + 1
+    
+    selected_indices = sorted_indices[:num_tokens]
+    selected_probs = sorted_probs[:num_tokens]
+    
+    return selected_probs, selected_indices
+
 def main():
     # Setup GPUs
     torch.distributed.init_process_group("nccl")
@@ -29,7 +42,7 @@ def main():
     model = Coconut(model, latent_id, start_id, end_id, tokenizer.eos_token_id)
 
     # Load model weights
-    saved_weights = torch.load("path/to/checkpoint", map_location=f"cuda:{local_rank}")
+    saved_weights = torch.load("/users/cns542/scratch/coconut/gsm-coconut-true/checkpoint_11", map_location=f"cuda:{local_rank}")
     model.load_state_dict(saved_weights, strict=False)
 
     # Move to GPU and set eval mode
@@ -60,16 +73,32 @@ def main():
         
         if rank == 0:
             print(f"Thought {i+1}:")
-            for j in range(5):
+            for j in range(len(top_k_indices)):
                 token_str = tokenizer.decode(top_k_indices[j].item())
                 prob = top_k_probs[j].item()
                 print(f"  {token_str}: {prob*100:.1f}%")
 
+    print("___")
+
+    for i, hidden in enumerate(latent_hidden_states):
+        thought_logits = lm_head(hidden)
+        thought_probs = torch.softmax(thought_logits, dim=-1)
+        
+        top_p_probs, top_p_indices = topp(thought_probs, p=0.9)
+        
+        if rank == 0:
+            print(f"Thought {i+1}:")
+            for j in range(len(top_p_indices)):
+                token_str = tokenizer.decode(top_p_indices[j].item())
+                prob = top_p_probs[j].item()
+                print(f"  {token_str}: {prob*100:.1f}%")
+
     output_text = tokenizer.decode(output_ids[0], skip_special_tokens=True)
     
+    print("___")
+
     if rank == 0:
         print(output_text)
-        print(len(latent_hidden_states))
 
     torch.distributed.destroy_process_group()
 
