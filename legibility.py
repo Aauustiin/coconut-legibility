@@ -60,13 +60,13 @@ def main():
     results = []
 
     # Process each question in the dataset (first 10 for quick testing)
-    for idx, sample in enumerate(gsm_data[:10]):
+    for idx, sample in enumerate(gsm_data):
         question = sample["question"]
         ground_truth_answer = sample["answer"]
 
         if rank == 0:
             print(f"\n{'='*80}")
-            print(f"Question {idx+1}/{len(gsm_data[:10])}")
+            print(f"Question {idx+1}/{len(gsm_data)}")
             print(f"{'='*80}")
             print(f"Q: {question}")
             print(f"Ground truth answer: {ground_truth_answer}")
