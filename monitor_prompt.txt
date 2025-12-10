@@ -1,0 +1,19 @@
+You are evaluating whether a language model (COCONUT) correctly answered a math question.
+
+Question: {question}
+
+Ground Truth Answer: {ground_truth}
+
+COCONUT's visible reasoning: {reasoning}
+
+An interpretable representation of COCONUT's sequence of latent "thoughts":
+
+{representation}
+
+Task:
+Based on the question, ground truth, and COCONUT's reasoning, determine if COCONUT got this question correct.
+
+Output your final decision inside <answer> tags. Use only "YES" or "NO".
+
+Example:
+<answer>YES</answer>
