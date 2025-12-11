@@ -1,19 +1,19 @@
 import argparse
 import json
 import re
-import torch
-from transformers import AutoTokenizer, AutoModelForCausalLM
+from vllm import LLM, SamplingParams
+from transformers import AutoTokenizer
 
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Load a HuggingFace model and representations file"
+        description="Load a HuggingFace model and generate predictions using vLLM"
     )
     parser.add_argument(
         "--model-id",
         type=str,
         required=True,
-        help="HuggingFace model identifier (e.g., 'openai-community/gpt2')"
+        help="HuggingFace model identifier (e.g., 'Qwen/Qwen3-1.7B')"
     )
     parser.add_argument(
         "--representations-file",
@@ -33,24 +33,55 @@ def parse_args():
         default="monitor_prompt.txt",
         help="Path to the prompt template file (default: monitor_prompt.txt)"
     )
+    parser.add_argument(
+        "--output-file",
+        type=str,
+        default="monitor_predictions.json",
+        help="Path to save predictions (default: monitor_predictions.json)"
+    )
+    parser.add_argument(
+        "--tensor-parallel-size",
+        type=int,
+        default=1,
+        help="Number of GPUs for tensor parallelism (default: 1)"
+    )
+    parser.add_argument(
+        "--disable-thinking",
+        action="store_true",
+        help="Disable Qwen3 thinking mode for faster inference"
+    )
     return parser.parse_args()
+
+
+def extract_prediction(response: str) -> str:
+    """Extract YES/NO prediction from response."""
+    pattern = r"<answer>\s*(YES|NO)\s*</answer>"
+    matches = re.findall(pattern, response, re.IGNORECASE)
+    if matches:
+        return matches[-1].upper()
+    return "UNKNOWN"
 
 
 def main():
     args = parse_args()
 
-    torch.manual_seed(42)
-    torch.cuda.manual_seed_all(42)
-
-    print(f"Loading model: {args.model_id}")
-    # load the tokenizer and the model
+    # Load tokenizer (needed for chat template)
+    print(f"Loading tokenizer: {args.model_id}")
     tokenizer = AutoTokenizer.from_pretrained(args.model_id)
-    model = AutoModelForCausalLM.from_pretrained(
-        args.model_id,
-        torch_dtype="auto",
-        device_map="auto"
+
+    # Load vLLM model
+    print(f"Loading vLLM model: {args.model_id}")
+    llm = LLM(
+        model=args.model_id,
+        tensor_parallel_size=args.tensor_parallel_size,
+        trust_remote_code=True,
+        seed=42,
+        # Optimize for throughput with a small model
+        max_model_len=8192,  # Adjust if your prompts are longer
+        gpu_memory_utilization=0.9,
     )
 
+    # Load data files
     print(f"Loading text representations from: {args.representations_file}")
     with open(args.representations_file, "r") as f:
         text_representations = json.load(f)
@@ -63,77 +94,99 @@ def main():
     with open(args.prompt_template, "r") as f:
         prompt_template = f.read()
 
+    # Prepare all prompts upfront
     print(f"\n{'='*80}")
-    print("Generating predictions for each question...")
+    print(f"Preparing {len(legibility_results)} prompts...")
     print(f"{'='*80}\n")
 
-    predictions = []
-
+    all_prompts = []
     for i, result in enumerate(legibility_results):
-        print(f"\nProcessing question {i+1}/{len(legibility_results)}")
-        print(f"GPU memory allocated: {torch.cuda.memory_allocated() / 1e9:.2f} GB")
-        print(f"GPU memory reserved: {torch.cuda.memory_reserved() / 1e9:.2f} GB")
-
-        # Get the corresponding text representation (already formatted)
         text_rep = text_representations[i]
 
         # Fill in the prompt template
-        prompt = prompt_template.format(
+        prompt_content = prompt_template.format(
             question=result["question"],
             ground_truth=result["ground_truth_answer"],
             reasoning=result["model_reasoning"],
             representation=text_rep
         )
 
-        messages = [
-            {"role": "user", "content": prompt}
-        ]
-        text = tokenizer.apply_chat_template(
+        # Optionally disable thinking mode for Qwen3
+        if args.disable_thinking:
+            prompt_content += "\n/no_think"
+
+        # Apply chat template
+        messages = [{"role": "user", "content": prompt_content}]
+        formatted_prompt = tokenizer.apply_chat_template(
             messages,
             tokenize=False,
             add_generation_prompt=True
         )
-        model_inputs = tokenizer([text], return_tensors="pt").to(model.device)
+        all_prompts.append(formatted_prompt)
 
-        # conduct text completion
-        generated_ids = model.generate(
-            **model_inputs,
-            max_new_tokens=4096
-        )
+    # Set up sampling parameters
+    sampling_params = SamplingParams(
+        max_tokens=4096,
+        temperature=0.6,  # Qwen3 default
+        top_p=0.95,       # Qwen3 default
+        seed=42,
+    )
 
-        # Decode the response
-        output_ids = generated_ids[0][len(model_inputs.input_ids[0]):].tolist() 
-        response = tokenizer.decode(output_ids, skip_special_tokens=False)
+    # Generate all responses in one batched call
+    print(f"Generating predictions for {len(all_prompts)} questions...")
+    print("(vLLM will automatically batch and optimize)")
+    print()
 
-        # Extract YES/NO prediction
-        pattern = r"<answer>\s*(YES|NO)\s*</answer>"
-        matches = re.findall(pattern, response, re.IGNORECASE)
-        if matches:
-            prediction = matches[-1].upper()
-        else:
-            prediction = "UNKNOWN"
+    outputs = llm.generate(all_prompts, sampling_params)
+
+    # Process results
+    print(f"\n{'='*80}")
+    print("Processing results...")
+    print(f"{'='*80}\n")
+
+    predictions = []
+    correct_predictions = 0
+    total_known = 0
+
+    for i, output in enumerate(outputs):
+        response = output.outputs[0].text
+        prediction = extract_prediction(response)
+        actual_correct = legibility_results[i]["is_correct"]
 
         predictions.append({
             "question_idx": i,
             "prediction": prediction,
             "full_response": response.strip(),
-            "actual_correct": result["is_correct"]
+            "actual_correct": actual_correct
         })
 
-        print(f"  Actual: {'CORRECT' if result['is_correct'] else 'INCORRECT'}")
-        print(f"  Predicted: {prediction}")
-        print(f"  Response: {response.strip()}")
+        # Track accuracy
+        if prediction != "UNKNOWN":
+            total_known += 1
+            predicted_correct = (prediction == "YES")
+            if predicted_correct == actual_correct:
+                correct_predictions += 1
+
+        # Progress update every 100 questions
+        if (i + 1) % 100 == 0 or i == len(outputs) - 1:
+            print(f"Processed {i + 1}/{len(outputs)} questions")
 
     # Save predictions
-    with open("monitor_predictions.json", "w") as f:
+    with open(args.output_file, "w") as f:
         json.dump(predictions, f, indent=2)
 
+    # Print summary
     print(f"\n{'='*80}")
-    print("Predictions saved to monitor_predictions.json")
+    print("SUMMARY")
     print(f"{'='*80}")
-
-    return model, tokenizer, text_representations, legibility_results, predictions
+    print(f"Total questions: {len(predictions)}")
+    print(f"Predictions made: {total_known} ({len(predictions) - total_known} UNKNOWN)")
+    if total_known > 0:
+        accuracy = correct_predictions / total_known * 100
+        print(f"Accuracy (on known predictions): {correct_predictions}/{total_known} ({accuracy:.1f}%)")
+    print(f"\nPredictions saved to: {args.output_file}")
+    print(f"{'='*80}")
 
 
 if __name__ == "__main__":
-    model, tokenizer, text_representations, legibility_results, predictions = main()
+    main()

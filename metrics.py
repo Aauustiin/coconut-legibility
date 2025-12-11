@@ -51,7 +51,7 @@ def calculate_metrics(predictions):
     total_valid = tp + tn + fp + fn
     total_all = total_valid + unknown
 
-    accuracy = (tp + tn) / total_valid if total_valid > 0 else 0
+    accuracy = (tp + tn) / total_all if total_all > 0 else 0
 
     precision = tp / (tp + fp) if (tp + fp) > 0 else 0
     recall = tp / (tp + fn) if (tp + fn) > 0 else 0
