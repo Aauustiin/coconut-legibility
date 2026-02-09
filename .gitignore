@@ -1,0 +1,4 @@
+data/*
+*.json
+.python-version
+*.png

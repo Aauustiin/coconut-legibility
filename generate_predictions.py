@@ -4,7 +4,6 @@ import re
 from vllm import LLM, SamplingParams
 from transformers import AutoTokenizer
 
-
 def parse_args():
     parser = argparse.ArgumentParser(
         description="Load a HuggingFace model and generate predictions using vLLM"
@@ -50,6 +49,11 @@ def parse_args():
         action="store_true",
         help="Disable Qwen3 thinking mode for faster inference"
     )
+    parser.add_argument(
+        "--cot",
+        action="store_true",
+        help="Use when predicting correctness on the basis of CoT"
+    )
     return parser.parse_args()
 
 
@@ -65,28 +69,20 @@ def extract_prediction(response: str) -> str:
 def main():
     args = parse_args()
 
-    # Load tokenizer (needed for chat template)
     print(f"Loading tokenizer: {args.model_id}")
     tokenizer = AutoTokenizer.from_pretrained(args.model_id)
 
-    # Load vLLM model
     print(f"Loading vLLM model: {args.model_id}")
     llm = LLM(
         model=args.model_id,
         tensor_parallel_size=args.tensor_parallel_size,
         trust_remote_code=True,
         seed=42,
-        # Optimize for throughput with a small model
-        max_model_len=8192,  # Adjust if your prompts are longer
+        max_model_len=8192,
         gpu_memory_utilization=0.9,
     )
 
-    # Load data files
-    print(f"Loading text representations from: {args.representations_file}")
-    with open(args.representations_file, "r") as f:
-        text_representations = json.load(f)
-
-    print(f"Loading legibility results from: {args.legibility_results}")
+    print(f"Loading legibility results from: {args.legibility_results}") # I shouldn't really be calling this legibility results
     with open(args.legibility_results, "r") as f:
         legibility_results = json.load(f)
 
@@ -94,28 +90,36 @@ def main():
     with open(args.prompt_template, "r") as f:
         prompt_template = f.read()
 
-    # Prepare all prompts upfront
+    if not args.cot:
+        print(f"Loading text representations from: {args.representations_file}")
+        with open(args.representations_file, "r") as f:
+            text_representations = json.load(f)
+
     print(f"\n{'='*80}")
     print(f"Preparing {len(legibility_results)} prompts...")
     print(f"{'='*80}\n")
 
     all_prompts = []
     for i, result in enumerate(legibility_results):
-        text_rep = text_representations[i]
 
-        # Fill in the prompt template
-        prompt_content = prompt_template.format(
-            question=result["question"],
-            ground_truth=result["ground_truth_answer"],
-            reasoning=result["model_reasoning"],
-            representation=text_rep
-        )
+        if args.cot:
+            prompt_content = prompt_template.format(
+                question=result["question"],
+                ground_truth=result["ground_truth_answer"],
+                reasoning=result["model_reasoning"]
+            )
+        else:
+            prompt_content = prompt_template.format(
+                question=result["question"],
+                ground_truth=result["ground_truth_answer"],
+                reasoning=result["model_reasoning"],
+                representation = text_representations[i]
+            )
 
         # Optionally disable thinking mode for Qwen3
         if args.disable_thinking:
             prompt_content += "\n/no_think"
 
-        # Apply chat template
         messages = [{"role": "user", "content": prompt_content}]
         formatted_prompt = tokenizer.apply_chat_template(
             messages,
@@ -124,29 +128,22 @@ def main():
         )
         all_prompts.append(formatted_prompt)
 
-    # Set up sampling parameters
     sampling_params = SamplingParams(
         max_tokens=4096,
-        temperature=0.6,  # Qwen3 default
-        top_p=0.95,       # Qwen3 default
+        temperature=0.6,
+        top_p=0.95,
         seed=42,
     )
 
     # Generate all responses in one batched call
     print(f"Generating predictions for {len(all_prompts)} questions...")
-    print("(vLLM will automatically batch and optimize)")
-    print()
-
     outputs = llm.generate(all_prompts, sampling_params)
 
-    # Process results
     print(f"\n{'='*80}")
     print("Processing results...")
     print(f"{'='*80}\n")
 
     predictions = []
-    correct_predictions = 0
-    total_known = 0
 
     for i, output in enumerate(outputs):
         response = output.outputs[0].text
@@ -160,30 +157,13 @@ def main():
             "actual_correct": actual_correct
         })
 
-        # Track accuracy
-        if prediction != "UNKNOWN":
-            total_known += 1
-            predicted_correct = (prediction == "YES")
-            if predicted_correct == actual_correct:
-                correct_predictions += 1
-
-        # Progress update every 100 questions
-        if (i + 1) % 100 == 0 or i == len(outputs) - 1:
-            print(f"Processed {i + 1}/{len(outputs)} questions")
-
-    # Save predictions
     with open(args.output_file, "w") as f:
         json.dump(predictions, f, indent=2)
 
-    # Print summary
     print(f"\n{'='*80}")
     print("SUMMARY")
     print(f"{'='*80}")
     print(f"Total questions: {len(predictions)}")
-    print(f"Predictions made: {total_known} ({len(predictions) - total_known} UNKNOWN)")
-    if total_known > 0:
-        accuracy = correct_predictions / total_known * 100
-        print(f"Accuracy (on known predictions): {correct_predictions}/{total_known} ({accuracy:.1f}%)")
     print(f"\nPredictions saved to: {args.output_file}")
     print(f"{'='*80}")
 

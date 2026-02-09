@@ -1,0 +1,572 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>COCONUT Results Viewer</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: #f5f5f5;
+            padding: 20px;
+            line-height: 1.6;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            padding: 30px;
+        }
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 30px;
+            padding-bottom: 20px;
+            border-bottom: 2px solid #e0e0e0;
+        }
+
+        h1 {
+            color: #333;
+            font-size: 24px;
+        }
+
+        .navigation {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
+        .nav-button {
+            background: #4a90e2;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background 0.3s;
+        }
+
+        .nav-button:hover:not(:disabled) {
+            background: #357abd;
+        }
+
+        .nav-button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+
+        .index-display {
+            font-size: 16px;
+            color: #666;
+            min-width: 120px;
+            text-align: center;
+        }
+
+        .jump-input {
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            width: 80px;
+            text-align: center;
+        }
+
+        .section {
+            margin-bottom: 25px;
+            padding: 20px;
+            background: #fafafa;
+            border-radius: 6px;
+            border-left: 4px solid #4a90e2;
+        }
+
+        .section-title {
+            font-size: 16px;
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .section-content {
+            color: #555;
+            white-space: pre-wrap;
+            font-size: 14px;
+        }
+
+        .question-section {
+            border-left-color: #9b59b6;
+        }
+
+        .representation-section {
+            border-left-color: #3498db;
+        }
+
+        .representation-section .section-content {
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+            background: white;
+            padding: 15px;
+            border-radius: 4px;
+        }
+
+        .answer-section {
+            border-left-color: #2ecc71;
+        }
+
+        .observer-thoughts-section {
+            border-left-color: #e74c3c;
+        }
+
+        .prediction-section {
+            border-left-color: #f39c12;
+        }
+
+        .correctness-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+            margin-left: 10px;
+        }
+
+        .correct {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .incorrect {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .model-selector {
+            margin-bottom: 20px;
+            padding: 15px;
+            background: #e8f4f8;
+            border-radius: 6px;
+        }
+
+        .model-selector label {
+            font-weight: 600;
+            margin-right: 10px;
+        }
+
+        .model-selector select {
+            padding: 8px;
+            border-radius: 4px;
+            border: 1px solid #ddd;
+            font-size: 14px;
+            min-width: 200px;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #999;
+        }
+
+        .error {
+            background: #f8d7da;
+            color: #721c24;
+            padding: 20px;
+            border-radius: 6px;
+            margin-bottom: 20px;
+        }
+
+        .side-by-side {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-bottom: 25px;
+        }
+
+        @media (max-width: 900px) {
+            .side-by-side {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .thoughts-container {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+        }
+
+        .thought-box {
+            background: white;
+            padding: 15px;
+            border-radius: 4px;
+            border: 1px solid #e0e0e0;
+        }
+
+        .thought-title {
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 15px;
+        }
+
+        .thought-content {
+            font-family: 'Courier New', monospace;
+            font-size: 15px;
+            line-height: 1.6;
+            color: #555;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>COCONUT Results Viewer</h1>
+            <div class="navigation">
+                <button class="nav-button" id="prevBtn" onclick="navigatePrev()">← Previous</button>
+                <span class="index-display" id="indexDisplay">Loading...</span>
+                <button class="nav-button" id="nextBtn" onclick="navigateNext()">Next →</button>
+                <input type="number" class="jump-input" id="jumpInput" placeholder="Go to" min="0">
+                <button class="nav-button" onclick="jumpToIndex()">Go</button>
+            </div>
+        </div>
+
+        <div class="model-selector">
+            <label for="modelSelect">Observer Model:</label>
+            <select id="modelSelect" onchange="loadPredictions()">
+                <option value="">Loading models...</option>
+            </select>
+            <label for="representationSelect" style="margin-left: 20px;">Representation:</label>
+            <select id="representationSelect" onchange="loadRepresentations()">
+                <option value="">Loading representations...</option>
+            </select>
+        </div>
+
+        <div id="content" class="loading">Loading data...</div>
+    </div>
+
+    <script>
+        let gsm8kData = [];
+        let legibilityData = [];
+        let representationsData = [];
+        let predictionsData = [];
+        let currentIndex = 0;
+
+        // Check if model reasoning contains only latent tokens
+        function hasOnlyLatentReasoning(modelReasoning) {
+            // Remove all latent tokens and whitespace
+            const withoutLatent = modelReasoning
+                .replace(/<\|start-latent\|>/g, '')
+                .replace(/<\|latent\|>/g, '')
+                .replace(/<\|end-latent\|>/g, '')
+                .trim();
+
+            // If anything remains, it contains non-latent reasoning
+            return withoutLatent.length === 0;
+        }
+
+        // Load all data on page load
+        async function init() {
+            try {
+                // Load GSM8K results
+                const gsm8kResponse = await fetch('gsm8k_results.json');
+                const allGsm8kData = await gsm8kResponse.json();
+
+                // Load legibility results for CoT
+                const legibilityResponse = await fetch('legibility_results.json');
+                const allLegibilityData = await legibilityResponse.json();
+
+                // Filter out samples with non-latent reasoning
+                const validIndices = [];
+                gsm8kData = [];
+                legibilityData = [];
+
+                for (let i = 0; i < allGsm8kData.length; i++) {
+                    if (hasOnlyLatentReasoning(allGsm8kData[i].model_reasoning)) {
+                        validIndices.push(i);
+                        gsm8kData.push(allGsm8kData[i]);
+                        legibilityData.push(allLegibilityData[i]);
+                    }
+                }
+
+                console.log(`Filtered ${allGsm8kData.length} samples down to ${gsm8kData.length} with only latent reasoning`);
+
+                // Store valid indices for filtering other data files
+                window.validIndices = validIndices;
+
+                // Find available representation files
+                const representationFiles = await findFiles('representations_*.json');
+                const representationSelect = document.getElementById('representationSelect');
+                const representationOptions = representationFiles.map(f =>
+                    `<option value="${f}">${f.replace('representations_', '').replace('.json', '')}</option>`
+                ).join('');
+                // Add CoT and None options
+                representationSelect.innerHTML = representationOptions +
+                    '<option value="CoT">CoT</option>' +
+                    '<option value="None">None</option>';
+
+                // Find available prediction files
+                const predictionFiles = await findFiles('*_Predictions.json');
+                const modelSelect = document.getElementById('modelSelect');
+                modelSelect.innerHTML = predictionFiles.map(f =>
+                    `<option value="${f}">${f.replace('_Predictions.json', '')}</option>`
+                ).join('');
+
+                // Load initial selections
+                await loadRepresentations();
+                await loadPredictions();
+
+                // Display first sample
+                displaySample();
+            } catch (error) {
+                document.getElementById('content').innerHTML = `
+                    <div class="error">
+                        <strong>Error loading data:</strong> ${error.message}
+                        <br><br>
+                        Please ensure all required JSON files are in the same directory as this HTML file.
+                    </div>
+                `;
+            }
+        }
+
+        // Simplified file finding - try common patterns
+        async function findFiles(pattern) {
+            // For representations
+            if (pattern === 'representations_*.json') {
+                const files = ['representations_top-k_5.json', 'representations_raw.json', 'representations_cot.json'];
+                const available = [];
+                for (const file of files) {
+                    try {
+                        const response = await fetch(file);
+                        if (response.ok) available.push(file);
+                    } catch (e) {}
+                }
+                return available.length > 0 ? available : ['representations_top-k_5.json'];
+            }
+
+            // For predictions
+            if (pattern === '*_Predictions.json') {
+                const models = ['Qwen3-1.7B_CoT', 'Qwen3-1.7B_Raw', 'Qwen3-1.7B_Top-K_5',
+                               'Qwen3-8B_CoT', 'Qwen3-8B_Raw', 'Qwen3-8B_Top-K_5',
+                               'Qwen3-14B_CoT', 'Qwen3-14B_Raw', 'Qwen3-14B_Top-K_5'];
+                const available = [];
+                for (const model of models) {
+                    const file = `${model}_Predictions.json`;
+                    try {
+                        const response = await fetch(file);
+                        if (response.ok) available.push(file);
+                    } catch (e) {}
+                }
+                return available.length > 0 ? available : ['Qwen3-1.7B_CoT_Predictions.json'];
+            }
+            return [];
+        }
+
+        // Format representation to show thoughts side-by-side
+        function formatRepresentation(representation) {
+            if (!representation || representation === null) return '';
+
+            // Check if this is a token probability representation (contains "Thought" pattern)
+            if (!representation.includes('Thought 1:')) {
+                return representation;
+            }
+
+            // Split by "Thought N:" pattern
+            const thoughtPattern = /Thought \d+:/;
+            const parts = representation.split(thoughtPattern);
+
+            // Extract thought titles
+            const titles = representation.match(/Thought \d+:/g) || [];
+
+            // Create HTML for each thought box
+            let thoughtsHTML = '<div class="thoughts-container">';
+            for (let i = 0; i < titles.length; i++) {
+                const content = parts[i + 1].trim();
+                thoughtsHTML += `
+                    <div class="thought-box">
+                        <div class="thought-title">${titles[i]}</div>
+                        <div class="thought-content">${content}</div>
+                    </div>
+                `;
+            }
+            thoughtsHTML += '</div>';
+
+            return thoughtsHTML;
+        }
+
+        async function loadRepresentations() {
+            const selectedFile = document.getElementById('representationSelect').value;
+            if (!selectedFile) return;
+
+            // Handle special representation types
+            if (selectedFile === 'CoT' || selectedFile === 'None') {
+                representationsData = selectedFile; // Store the special type
+                displaySample();
+                return;
+            }
+
+            try {
+                const response = await fetch(selectedFile);
+                const allRepresentations = await response.json();
+
+                // Filter to only valid indices
+                representationsData = window.validIndices.map(i => allRepresentations[i]);
+                displaySample();
+            } catch (error) {
+                console.error('Error loading representations:', error);
+            }
+        }
+
+        async function loadPredictions() {
+            const selectedFile = document.getElementById('modelSelect').value;
+            if (!selectedFile) return;
+
+            try {
+                const response = await fetch(selectedFile);
+                const allPredictions = await response.json();
+
+                // Filter to only valid indices
+                predictionsData = window.validIndices.map(i => allPredictions[i]);
+                displaySample();
+            } catch (error) {
+                console.error('Error loading predictions:', error);
+            }
+        }
+
+        function displaySample() {
+            if (!gsm8kData.length || !predictionsData.length) {
+                return;
+            }
+            // Allow representationsData to be a string ("CoT" or "None") or array
+            if (!representationsData && representationsData !== 'CoT' && representationsData !== 'None') {
+                return;
+            }
+
+            const gsm8k = gsm8kData[currentIndex];
+            const prediction = predictionsData[currentIndex];
+
+            // Determine what to show for representation
+            let representation;
+            if (representationsData === 'CoT') {
+                representation = legibilityData[currentIndex]?.model_reasoning || 'N/A';
+            } else if (representationsData === 'None') {
+                representation = null;
+            } else {
+                representation = representationsData[currentIndex];
+            }
+
+            // Extract observer thoughts and prediction from full response
+            let observerThoughts = '';
+            let observerPrediction = '';
+
+            if (prediction && prediction.full_response) {
+                const thinkMatch = prediction.full_response.match(/<think>([\s\S]*?)<\/think>/);
+                const answerMatch = prediction.full_response.match(/<answer>([\s\S]*?)<\/answer>/);
+
+                observerThoughts = thinkMatch ? thinkMatch[1].trim() : 'No thoughts available';
+                observerPrediction = answerMatch ? answerMatch[1].trim() : prediction.prediction || 'N/A';
+            }
+
+            const correctnessBadge = gsm8k.is_correct ?
+                '<span class="correctness-badge correct">✓ Correct</span>' :
+                '<span class="correctness-badge incorrect">✗ Incorrect</span>';
+
+            // Check if observer's prediction matches actual correctness
+            const observerCorrect = (prediction.prediction === 'YES' && gsm8k.is_correct) ||
+                                   (prediction.prediction === 'NO' && !gsm8k.is_correct);
+            const predictionBadge = observerCorrect ?
+                '<span class="correctness-badge correct">✓ Observer Correct</span>' :
+                '<span class="correctness-badge incorrect">✗ Observer Wrong</span>';
+
+            // Build representation section HTML
+            const representationHTML = representation !== null ? `
+                <div class="section representation-section">
+                    <div class="section-title">Interpretable Representation of Latent Thoughts</div>
+                    <div class="section-content">${formatRepresentation(representation)}</div>
+                </div>
+            ` : '';
+
+            document.getElementById('content').innerHTML = `
+                <div class="section question-section">
+                    <div class="section-title">Question</div>
+                    <div class="section-content">${gsm8k.question}</div>
+                </div>
+
+                ${representationHTML}
+
+                <div class="section observer-thoughts-section">
+                    <div class="section-title">Observer's Reasoning Process</div>
+                    <div class="section-content">${observerThoughts}</div>
+                </div>
+
+                <div class="side-by-side">
+                    <div class="section answer-section">
+                        <div class="section-title">COCONUT's Answer ${correctnessBadge}</div>
+                        <div class="section-content">
+                            <strong>Answer:</strong> ${gsm8k.model_answer}
+                            <br><strong>Ground Truth:</strong> ${gsm8k.ground_truth_answer}
+                        </div>
+                    </div>
+
+                    <div class="section prediction-section">
+                        <div class="section-title">Observer's Prediction ${predictionBadge}</div>
+                        <div class="section-content">
+                            <strong>Prediction:</strong> ${observerPrediction}
+                            <br><strong>Actual Correctness:</strong> ${gsm8k.is_correct ? 'YES' : 'NO'}
+                        </div>
+                    </div>
+                </div>
+            `;
+
+            // Update navigation
+            document.getElementById('indexDisplay').textContent = `Sample ${currentIndex + 1} / ${gsm8kData.length}`;
+            document.getElementById('prevBtn').disabled = currentIndex === 0;
+            document.getElementById('nextBtn').disabled = currentIndex === gsm8kData.length - 1;
+            document.getElementById('jumpInput').max = gsm8kData.length - 1;
+        }
+
+        function navigatePrev() {
+            if (currentIndex > 0) {
+                currentIndex--;
+                displaySample();
+            }
+        }
+
+        function navigateNext() {
+            if (currentIndex < gsm8kData.length - 1) {
+                currentIndex++;
+                displaySample();
+            }
+        }
+
+        function jumpToIndex() {
+            const input = document.getElementById('jumpInput');
+            const index = parseInt(input.value);
+            if (!isNaN(index) && index >= 0 && index < gsm8kData.length) {
+                currentIndex = index;
+                displaySample();
+            } else {
+                alert(`Please enter a valid index between 0 and ${gsm8kData.length - 1}`);
+            }
+        }
+
+        // Keyboard navigation
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'ArrowLeft') navigatePrev();
+            if (e.key === 'ArrowRight') navigateNext();
+        });
+
+        // Initialize on page load
+        init();
+    </script>
+</body>
+</html>
