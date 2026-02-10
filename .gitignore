@@ -3,3 +3,5 @@ data/*
 .python-version
 *.png
 .claude/*
+.DS_Store
+.python-version
