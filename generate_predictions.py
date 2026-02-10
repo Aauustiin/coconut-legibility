@@ -34,8 +34,8 @@ def parse_args():
     parser.add_argument(
         "--prompt-template",
         type=str,
-        default="monitor_prompt.txt",
-        help="Path to the prompt template file (default: monitor_prompt.txt)"
+        default="data/monitor_prompt.txt",
+        help="Path to the prompt template file (default: data/monitor_prompt.txt)"
     )
     parser.add_argument(
         "--output-file",
