@@ -1,9 +1,23 @@
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 import json
-from coconut import Coconut
+import argparse
+from utils import get_unique_filepath
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="Evaluate GPT-2 CoT model on GSM8k")
+    parser.add_argument(
+        "--output-dir",
+        type=str,
+        default="outputs",
+        help="Directory to save output files (default: outputs)"
+    )
+    return parser.parse_args()
+
 
 def main():
+    args = parse_args()
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
     # Initialise tokeniser with special tokens
@@ -75,10 +89,11 @@ def main():
             "is_correct": is_correct,
         })
 
-    # Save results
-    with open("legibility_results.json", "w") as f:
+    # Save results with unique filename
+    results_path = get_unique_filepath(args.output_dir, "gpt2_cot_gsm_results.json")
+    with open(results_path, "w") as f:
         json.dump(results, f, indent=2)
-    print(f"\nResults saved to legibility_results.json")
+    print(f"\nResults saved to {results_path}")
 
 if __name__ == "__main__":
     main()

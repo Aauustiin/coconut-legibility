@@ -3,6 +3,11 @@ import json
 import re
 from vllm import LLM, SamplingParams
 from transformers import AutoTokenizer
+from utils import get_unique_filepath
+
+RAW_EXPLANATION = "Before submitting an answer, the latent reasoning model generated the following 3 thoughts:\n"
+DECODING_EXPLANATION = "Before submitting an answer, the latent reasoning model generated 3 thoughts. Each thought has been decoded into a distribution over tokens:\n"
+
 
 def parse_args():
     parser = argparse.ArgumentParser(
@@ -36,7 +41,13 @@ def parse_args():
         "--output-file",
         type=str,
         default="monitor_predictions.json",
-        help="Path to save predictions (default: monitor_predictions.json)"
+        help="Filename to save predictions (default: monitor_predictions.json)"
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=str,
+        default="outputs",
+        help="Directory to save output files (default: outputs)"
     )
     parser.add_argument(
         "--tensor-parallel-size",
@@ -82,7 +93,7 @@ def main():
         gpu_memory_utilization=0.9,
     )
 
-    print(f"Loading legibility results from: {args.legibility_results}") # I shouldn't really be calling this legibility results
+    print(f"Loading legibility results from: {args.legibility_results}")
     with open(args.legibility_results, "r") as f:
         legibility_results = json.load(f)
 
@@ -93,7 +104,14 @@ def main():
     if not args.cot:
         print(f"Loading text representations from: {args.representations_file}")
         with open(args.representations_file, "r") as f:
-            text_representations = json.load(f)
+            representations_data = json.load(f)
+            text_representations = representations_data["representations"]
+            thought_type = representations_data.get('thought_type', 'unknown')
+            print(f"  Thought type: {thought_type}")
+        if thought_type == "raw":
+            explanation = RAW_EXPLANATION
+        else:
+            explanation = DECODING_EXPLANATION
 
     print(f"\n{'='*80}")
     print(f"Preparing {len(legibility_results)} prompts...")
@@ -113,7 +131,7 @@ def main():
                 question=result["question"],
                 ground_truth=result["ground_truth_answer"],
                 reasoning=result["model_reasoning"],
-                representation = text_representations[i]
+                representation = explanation + text_representations[i]
             )
 
         # Optionally disable thinking mode for Qwen3
@@ -157,14 +175,16 @@ def main():
             "actual_correct": actual_correct
         })
 
-    with open(args.output_file, "w") as f:
+    # Save with unique filename
+    output_path = get_unique_filepath(args.output_dir, args.output_file)
+    with open(output_path, "w") as f:
         json.dump(predictions, f, indent=2)
 
     print(f"\n{'='*80}")
     print("SUMMARY")
     print(f"{'='*80}")
     print(f"Total questions: {len(predictions)}")
-    print(f"\nPredictions saved to: {args.output_file}")
+    print(f"\nPredictions saved to: {output_path}")
     print(f"{'='*80}")
 
 

@@ -1,9 +1,24 @@
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 import json
+import argparse
 from coconut import Coconut
+from utils import get_unique_filepath
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="Evaluate COCONUT model on GSM8k")
+    parser.add_argument(
+        "--output-dir",
+        type=str,
+        default="outputs",
+        help="Directory to save output files (default: outputs)"
+    )
+    return parser.parse_args()
+
 
 def main():
+    args = parse_args()
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
     # Initialise tokeniser with special tokens
@@ -109,17 +124,20 @@ def main():
             "is_correct": is_correct,
         })
 
-    # Save results
-    with open("legibility_results.json", "w") as f:
+    # Save results with unique filenames
+    results_path = get_unique_filepath(args.output_dir, "coconut_gsm_results.json")
+    with open(results_path, "w") as f:
         json.dump(results, f, indent=2)
-    print(f"\nResults saved to legibility_results.json")
+    print(f"\nResults saved to {results_path}")
 
     # Save raw thoughts and logit thoughts separately
-    torch.save(raw_thoughts, "raw_thoughts.pt")
-    print(f"Raw thoughts saved to raw_thoughts.pt")
+    raw_thoughts_path = get_unique_filepath(args.output_dir, "raw_thoughts.pt")
+    torch.save(raw_thoughts, raw_thoughts_path)
+    print(f"Raw thoughts saved to {raw_thoughts_path}")
 
-    torch.save(logit_thoughts, "logit_thoughts.pt")
-    print(f"Logit thoughts saved to logit_thoughts.pt")
+    logit_thoughts_path = get_unique_filepath(args.output_dir, "logit_thoughts.pt")
+    torch.save(logit_thoughts, logit_thoughts_path)
+    print(f"Logit thoughts saved to {logit_thoughts_path}")
 
 if __name__ == "__main__":
     main()

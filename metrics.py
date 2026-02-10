@@ -1,7 +1,6 @@
 import json
 import argparse
 
-
 def parse_args():
     parser = argparse.ArgumentParser(
         description="Calculate metrics from monitor predictions"

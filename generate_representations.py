@@ -1,7 +1,10 @@
 import torch
 import argparse
 import json
+from pathlib import Path
 from transformers import AutoTokenizer
+from utils import get_unique_filepath
+
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Process thoughts with top-k, top-p, or raw sampling")
@@ -23,6 +26,18 @@ def parse_args():
         type=float,
         default=0.9,
         help="Value of p for top-p sampling (default: 0.9)"
+    )
+    parser.add_argument(
+        "--input-dir",
+        type=str,
+        default=".",
+        help="Directory containing input thought files (default: current directory)"
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=str,
+        default="outputs",
+        help="Directory to save output files (default: outputs)"
     )
     return parser.parse_args()
 
@@ -59,9 +74,11 @@ def main():
 
     # Load raw thoughts or logit thoughts based on thought type
     if args.thought_type == "raw":
-        raw_thoughts = torch.load("raw_thoughts.pt")
+        raw_thoughts_path = Path(args.input_dir) / "raw_thoughts.pt"
+        raw_thoughts = torch.load(raw_thoughts_path)
     else:
-        logit_thoughts = torch.load("logit_thoughts.pt")
+        logit_thoughts_path = Path(args.input_dir) / "logit_thoughts.pt"
+        logit_thoughts = torch.load(logit_thoughts_path)
 
         prob_thoughts = []
         for sequence in logit_thoughts:
@@ -71,11 +88,9 @@ def main():
                 sequence_probs.append(probs.cpu())
             prob_thoughts.append(sequence_probs)
 
-    representations = []
     text_representations = []
 
     if args.thought_type == "raw":
-        filename = f"representations_{args.thought_type}.pt"
         text_filename = f"representations_{args.thought_type}.json"
         for sequence in raw_thoughts:
             representation = []
@@ -83,7 +98,6 @@ def main():
                 thought_values = thought.flatten().tolist()
                 rounded_values = [round(val, 4) for val in thought_values]
                 representation.append(rounded_values)
-            representations.append(representation)
             # Format text representation
             formatted = []
             for thought_idx, thought_values in enumerate(representation):
@@ -92,7 +106,6 @@ def main():
                 formatted.append(f"  [{values_str}]")
             text_representations.append("\n".join(formatted))
     elif args.thought_type == "top-k":
-        filename = f"representations_{args.thought_type}_{args.k}.pt"
         text_filename = f"representations_{args.thought_type}_{args.k}.json"
         for sequence in prob_thoughts:
             representation = []
@@ -104,10 +117,8 @@ def main():
                     for j in range(len(top_k_indices))
                 ]
                 representation.append(top_k_data)
-            representations.append(representation)
             text_representations.append(format_representation(representation))
     elif args.thought_type == "top-p":
-        filename = f"representations_{args.thought_type}_{args.p}.pt"
         text_filename = f"representations_{args.thought_type}_{args.p}.json"
         for sequence in prob_thoughts:
             representation = []
@@ -119,17 +130,25 @@ def main():
                     for j in range(len(top_k_indices))
                 ]
                 representation.append(top_k_data)
-            representations.append(representation)
             text_representations.append(format_representation(representation))
 
-    # Save original representations
-    torch.save(representations, filename)
-    print(f"Saved representations to {filename}")
+    # Prepare output data with thought type
+    output_data = {
+        "thought_type": args.thought_type,
+        "representations": text_representations
+    }
 
-    # Save text representations
-    with open(text_filename, "w") as f:
-        json.dump(text_representations, f, indent=2)
-    print(f"Saved text representations to {text_filename}")
+    # Add additional parameters if applicable
+    if args.thought_type == "top-k":
+        output_data["k"] = args.k
+    elif args.thought_type == "top-p":
+        output_data["p"] = args.p
+
+    # Save with unique filename
+    output_path = get_unique_filepath(args.output_dir, text_filename)
+    with open(output_path, "w") as f:
+        json.dump(output_data, f, indent=2)
+    print(f"Saved text representations to {output_path}")
 
 
 if __name__ == "__main__":
